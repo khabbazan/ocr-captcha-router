@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints/
+
+# model weights live on the Hugging Face Hub
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+.DS_Store
+.idea/
+.vscode/

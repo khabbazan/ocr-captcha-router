@@ -1,0 +1,19 @@
+{
+  "pipeline_type": "ocr-captcha-router",
+  "router_path": ".",
+  "math_model_id": "arkhabbazan/ocr-math-captcha",
+  "digit_model_id": "anuashok/ocr-captcha-v3",
+  "router_confidence_threshold": 0.95,
+  "math_confidence_threshold": 0.85,
+  "full_math_pattern": "^\\d+[+-]\\d+=\\?$",
+  "partial_math_pattern": "^\\d+[+-]\\d+=?$",
+  "digit_pattern": "^\\d{4,7}$",
+  "fallback": "run-both-and-score-format",
+  "constrain_digit_decoder": true,
+  "reject_invalid_partial_math": true,
+  "source_repositories": {
+    "router": "arkhabbazan/ocr-captcha-router",
+    "math": "arkhabbazan/ocr-math-captcha",
+    "digits": "anuashok/ocr-captcha-v3"
+  }
+}
