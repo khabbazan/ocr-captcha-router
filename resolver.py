@@ -7,7 +7,6 @@ import torch
 from huggingface_hub import snapshot_download
 from PIL import Image, ImageOps
 from transformers import (
-    AutoImageProcessor,
     AutoModelForImageClassification,
     TrOCRProcessor,
     VisionEncoderDecoderModel,
@@ -53,9 +52,14 @@ class CaptchaResolver:
             )
 
         router_dir = self.repo_dir / self.config["router_path"]
-        self.router_processor = AutoImageProcessor.from_pretrained(
-            router_dir
+        preprocess = json.loads(
+            (router_dir / "router_preprocess.json").read_text(encoding="utf-8")
         )
+        self.router_height = int(preprocess["input_height"])
+        self.router_width = int(preprocess["input_width"])
+        self.router_scale = float(preprocess["eval_scale"])
+        self.router_mean = np.array(preprocess["mean"], dtype=np.float32)
+        self.router_std = np.array(preprocess["std"], dtype=np.float32)
         self.router_model = (
             AutoModelForImageClassification.from_pretrained(router_dir)
             .to(self.device)
@@ -79,7 +83,7 @@ class CaptchaResolver:
             token=token,
             allow_patterns=[
                 "config.json",
-                "preprocessor_config.json",
+                "router_preprocess.json",
                 "model.safetensors",
                 "model-*.safetensors",
                 "model.safetensors.index.json",
@@ -109,44 +113,42 @@ class CaptchaResolver:
             .strip()
         )
 
-    @staticmethod
-    def pad_router_image(image):
+    def router_tensor(self, image):
+        # Aspect-preserving letterbox into (router_height x router_width),
+        # padded with the median corner colour. Must match router_preprocess.json.
         image = image.convert("RGB")
-        side = max(image.size)
-
+        width, height = image.size
         corners = np.array(
             [
                 image.getpixel((0, 0)),
-                image.getpixel((image.width - 1, 0)),
-                image.getpixel((0, image.height - 1)),
-                image.getpixel(
-                    (image.width - 1, image.height - 1)
-                ),
+                image.getpixel((width - 1, 0)),
+                image.getpixel((0, height - 1)),
+                image.getpixel((width - 1, height - 1)),
             ],
             dtype=np.uint8,
         )
-
         background = tuple(
-            np.median(corners, axis=0)
-            .astype(np.uint8)
-            .tolist()
+            np.median(corners, axis=0).astype(np.uint8).tolist()
         )
-
-        padded = Image.new(
-            "RGB",
-            (side, side),
-            background,
+        scale = min(
+            self.router_width / width, self.router_height / height
+        ) * self.router_scale
+        new_width = max(8, round(width * scale))
+        new_height = max(8, round(height * scale))
+        canvas = Image.new(
+            "RGB", (self.router_width, self.router_height), background
         )
-
-        padded.paste(
-            image,
+        canvas.paste(
+            image.resize((new_width, new_height), Image.Resampling.LANCZOS),
             (
-                (side - image.width) // 2,
-                (side - image.height) // 2,
+                (self.router_width - new_width) // 2,
+                (self.router_height - new_height) // 2,
             ),
         )
-
-        return padded
+        array = (
+            np.asarray(canvas, dtype=np.float32) / 255.0 - self.router_mean
+        ) / self.router_std
+        return torch.from_numpy(array.transpose(2, 0, 1).copy())
 
     def repair_math(self, text):
         text = self.normalize(text)
@@ -172,10 +174,7 @@ class CaptchaResolver:
         return self._experts[route]
 
     def route(self, image):
-        padded = self.pad_router_image(image)
-        values = self.router_processor(
-            images=padded, return_tensors="pt"
-        ).pixel_values.to(self.device)
+        values = self.router_tensor(image).unsqueeze(0).to(self.device)
         with torch.inference_mode():
             probabilities = torch.softmax(
                 self.router_model(pixel_values=values).logits, dim=-1
@@ -197,21 +196,6 @@ class CaptchaResolver:
             views.append(ImageOps.invert(gray).convert("RGB"))
         return views
 
-    def _digit_token_ids(self, tokenizer):
-        if hasattr(self, "_cached_digit_token_ids"):
-            return self._cached_digit_token_ids
-        allowed = []
-        for token_id in tokenizer.get_vocab().values():
-            piece = tokenizer.decode(
-                [token_id],
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False,
-            )
-            if re.fullmatch(r"\s*\d+\s*", piece or ""):
-                allowed.append(int(token_id))
-        self._cached_digit_token_ids = sorted(set(allowed))
-        return self._cached_digit_token_ids
-
     def run_expert(self, image, route):
         processor, model = self._load_expert(route)
         if route == "math":
@@ -227,25 +211,9 @@ class CaptchaResolver:
             )[0]
             return self.normalize(decoded)
 
-        digit_ids = self._digit_token_ids(processor.tokenizer)
-        eos_id = model.generation_config.eos_token_id
-
-        def allow_digit_tokens(batch_id, input_ids):
-            prefix = self.normalize(
-                processor.tokenizer.decode(
-                    input_ids.tolist(),
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=False,
-                )
-            )
-            digit_count = len(re.sub(r"\D", "", prefix))
-            if digit_count >= 7 and eos_id is not None:
-                return [int(eos_id)]
-            allowed = list(digit_ids)
-            if digit_count >= 4 and eos_id is not None:
-                allowed.append(int(eos_id))
-            return allowed
-
+        # No token whitelist: constraining the decoder to digit tokens made it
+        # append spurious digits (e.g. 9404 -> 9404404). Validate with the
+        # digit_pattern regex instead and pick the best valid view.
         candidates = []
         for view in self._digit_views(image):
             values = processor(
@@ -257,10 +225,6 @@ class CaptchaResolver:
                 "return_dict_in_generate": True,
                 "output_scores": True,
             }
-            if digit_ids:
-                generation_kwargs["prefix_allowed_tokens_fn"] = (
-                    allow_digit_tokens
-                )
             with torch.inference_mode():
                 output = model.generate(values, **generation_kwargs)
             decoded = self.normalize(

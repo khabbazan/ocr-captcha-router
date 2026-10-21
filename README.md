@@ -11,13 +11,13 @@ Model weights live on the Hugging Face Hub, not in this repository. `CaptchaReso
 
 ## How it works
 
-1. **Route** — a MobileNetV2 classifier (2 labels: `digits`, `math`) predicts the captcha type. The router input is padded to a square using the median corner color, so the original aspect ratio is preserved.
+1. **Route** — a ConvNeXt-tiny classifier (2 labels: `digits`, `math`) predicts the captcha type. The router input is letterboxed into 96×384 with the median corner color, so the original aspect ratio is preserved (`router_preprocess.json` holds the exact parameters).
 2. **Run the expert** — a TrOCR model transcribes the image.
-   - *digits*: decoding is constrained to digit-only tokens, with 4–7 digits enforced, over up to three preprocessed views (original, autocontrast grayscale, inverted); the highest-scoring valid candidate wins.
+   - *digits*: beam search over up to three preprocessed views (original, autocontrast grayscale, inverted); the highest-scoring candidate matching `digit_pattern` wins. Decoding is not restricted to digit tokens: a token whitelist made the decoder append spurious digits (`9404` → `9404404`).
    - *math*: beam search, followed by repair of a truncated `a+b=` into `a+b=?`.
 3. **Fallback** — if router confidence is below `router_confidence_threshold` (0.95) or the primary output fails its grammar, the other expert also runs and `choose_candidates` decides:
    - both valid and the router strongly favors math (probability ≥ `math_confidence_threshold`) → math
-   - both valid otherwise → the constrained digit candidate
+   - both valid otherwise → the digit candidate
    - exactly one valid → that one
    - neither valid → `route: "unknown"`, `valid_format: false`
 
@@ -68,7 +68,16 @@ print(resolver.predict("captcha.jpeg"))
 
 When the fallback runs, the result also carries `digits_candidate` and `math_candidate`.
 
-Keep the captcha at its original aspect ratio — the resolver pads only the router input and leaves OCR preprocessing to each TrOCR processor.
+Keep the captcha at its original aspect ratio — the resolver letterboxes only the router input and leaves OCR preprocessing to each TrOCR processor.
+
+The router can also be used on its own, without the OCR experts:
+
+```python
+from router_inference import CaptchaRouter
+
+router = CaptchaRouter("path/to/downloaded/repo")
+label, confidence, probabilities = router.route(image)   # image: PIL.Image
+```
 
 ## Configuration
 
@@ -92,7 +101,8 @@ Keep the captcha at its original aspect ratio — the resolver pads only the rou
 | --- | --- |
 | `resolver.py` | `CaptchaResolver` — routing, expert execution, fallback |
 | `pipeline_config.json` | thresholds, expert model ids, grammars |
-| `config.json`, `preprocessor_config.json` | router (MobileNetV2) model and image-processor config |
+| `router_inference.py` | standalone `CaptchaRouter` (route only, no OCR) |
+| `config.json`, `router_preprocess.json` | router (ConvNeXt-tiny) model config and letterbox preprocessing parameters |
 | `resolver-flow.png` | architecture diagram |
 
 ## License

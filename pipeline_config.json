@@ -9,7 +9,6 @@
   "partial_math_pattern": "^\\d+[+-]\\d+=?$",
   "digit_pattern": "^\\d{4,7}$",
   "fallback": "run-both-and-score-format",
-  "constrain_digit_decoder": true,
   "reject_invalid_partial_math": true,
   "source_repositories": {
     "router": "arkhabbazan/ocr-captcha-router",
