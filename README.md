@@ -29,7 +29,7 @@ A partial math match (`a+b=` without `?`) is never accepted on its own — the m
 | --- | --- |
 | Router | [`arkhabbazan/ocr-captcha-router`](https://huggingface.co/arkhabbazan/ocr-captcha-router) |
 | Math OCR | [`arkhabbazan/ocr-math-captcha`](https://huggingface.co/arkhabbazan/ocr-math-captcha) |
-| Digit OCR | [`anuashok/ocr-captcha-v3`](https://huggingface.co/anuashok/ocr-captcha-v3) |
+| Digit OCR | [`arkhabbazan/ocr-digits-captcha`](https://huggingface.co/arkhabbazan/ocr-digits-captcha) |
 
 ## Install
 

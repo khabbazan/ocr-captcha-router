@@ -2,7 +2,7 @@
   "pipeline_type": "ocr-captcha-router",
   "router_path": ".",
   "math_model_id": "arkhabbazan/ocr-math-captcha",
-  "digit_model_id": "anuashok/ocr-captcha-v3",
+  "digit_model_id": "arkhabbazan/ocr-digits-captcha",
   "router_confidence_threshold": 0.95,
   "math_confidence_threshold": 0.85,
   "full_math_pattern": "^\\d+[+-]\\d+=\\?$",
@@ -13,6 +13,6 @@
   "source_repositories": {
     "router": "arkhabbazan/ocr-captcha-router",
     "math": "arkhabbazan/ocr-math-captcha",
-    "digits": "anuashok/ocr-captcha-v3"
+    "digits": "arkhabbazan/ocr-digits-captcha"
   }
 }
